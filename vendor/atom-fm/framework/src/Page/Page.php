@@ -1,0 +1,117 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Atom\Page;
+
+use Atom\Http\MiddlewareInterface;
+use Atom\Router\Route;
+use Atom\Router\RouteEntry;
+use Atom\Validation\ValidationResult;
+use Atom\Validation\Validator;
+use RuntimeException;
+
+abstract class Page
+{
+    public ?string $layout = null;
+    private ?ValidationResult $validation = null;
+    private string $flashMessage = "";
+    private string $flashTitle = "";
+    private string $flashVariant = "success";
+
+    /**
+     * @param array<class-string<MiddlewareInterface>|MiddlewareInterface> $middlewares
+     * @return RouteEntry[]
+     */
+    public static function registerPages(?string $directory = null, array $middlewares = []): array
+    {
+        return (new PageRouteRegistrar())->registerDirectory(
+            Route::getRouter(),
+            $directory ?? self::defaultPageDirectory(),
+            middlewares: $middlewares
+        );
+    }
+
+    private static function defaultPageDirectory(): string
+    {
+        $callerFile = null;
+        foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS) as $frame) {
+            $file = $frame["file"] ?? null;
+            if (is_string($file) && realpath($file) !== realpath(__FILE__)) {
+                $callerFile = $file;
+                break;
+            }
+        }
+
+        if ($callerFile === null) {
+            throw new RuntimeException("Cannot infer page directory. Pass it explicitly to Page::registerPages().");
+        }
+
+        return dirname($callerFile) . DIRECTORY_SEPARATOR . "Pages";
+    }
+
+    public function template(): ?string
+    {
+        return null;
+    }
+
+    public function validate(): bool
+    {
+        $this->validation = Validator::for(static::class)->validate($this);
+
+        return $this->validation->passed();
+    }
+
+    /** @param array<string, mixed>|object $model */
+    protected function validateModel(array|object $model, string|null $className = null): bool
+    {
+        $this->validation = Validator::for($className ?? (is_object($model) ? $model::class : null))->validate($model);
+
+        return $this->validation->passed();
+    }
+
+    public function errors(): ValidationResult
+    {
+        return $this->validation ??= ValidationResult::valid();
+    }
+
+    public function flash(string $message, string $variant = "success", string $title = ""): void
+    {
+        $this->flashMessage = $message;
+        $this->flashVariant = $variant;
+        $this->flashTitle = $title;
+    }
+
+    #[PageAction("clearFlash")]
+    public function clearFlash(): void
+    {
+        $this->flashMessage = "";
+        $this->flashTitle = "";
+        $this->flashVariant = "success";
+    }
+
+    public function hasFlash(): bool
+    {
+        return $this->flashMessage !== "" || $this->flashTitle !== "";
+    }
+
+    public function flashMessage(): string
+    {
+        return $this->flashMessage;
+    }
+
+    public function flashTitle(): string
+    {
+        return $this->flashTitle;
+    }
+
+    public function flashVariant(): string
+    {
+        return $this->flashVariant;
+    }
+
+    protected function setValidation(ValidationResult $validation): void
+    {
+        $this->validation = $validation;
+    }
+}
